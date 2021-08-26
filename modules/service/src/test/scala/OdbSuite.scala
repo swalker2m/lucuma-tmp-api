@@ -16,13 +16,12 @@ import clue.http4sjdk.Http4sJDKWSBackend
 import io.circe.literal._
 import lucuma.core.model.User
 import lucuma.odb.api.repo.OdbRepo
-import lucuma.odb.api.service.{OdbService, Routes, Init}
+import lucuma.odb.api.service.{ Init, Main }
 import lucuma.sso.client.SsoClient
 import munit.CatsEffectSuite
 import org.http4s.{Uri => Http4sUri, _}
 import org.http4s.blaze.server.BlazeServerBuilder
 import org.http4s.headers.Authorization
-import org.http4s.implicits._
 import org.http4s.server.Server
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
@@ -44,19 +43,19 @@ trait OdbSuite extends CatsEffectSuite {
     new SsoClient[IO, User] {
       def find(req: Request[IO]): IO[Option[User]] = IO.pure(None)
       def get(authorization: Authorization): IO[Option[User]] = IO.pure(None)
+      def require(req: Request[IO])(f: User => IO[Response[IO]]): IO[Response[IO]] = ???
       def map[B](f: User => B): SsoClient[IO,B] = ???
+      def filter(f: User => Boolean): SsoClient[IO,User] = ???
+      def collect[B](f: PartialFunction[User,B]): SsoClient[IO,B] = ???
     }
 
-  private val app: IO[HttpApp[IO]] =
-    OdbRepo
-      .create[IO]
-      .flatTap(Init.initialize(_))
-      .map(OdbService(_))
-      .map(Routes.forService(_, ssoClient).orNotFound)
+  private val httpApp: Resource[IO, HttpApp[IO]] =
+    Resource.eval(OdbRepo.create[IO].flatTap(Init.initialize(_)))
+      .flatMap(Main.httpApp(ssoClient, _))
 
   private val server: Resource[IO, Server] =
     Resource.make(IO.println("  • Server starting..."))(_ => IO.println("  • Server stopped.")) *>
-    Resource.eval(app).flatMap { app =>
+    httpApp.flatMap { app =>
       BlazeServerBuilder[IO](ExecutionContext.global)
         .withHttpApp(app)
         .bindAny()

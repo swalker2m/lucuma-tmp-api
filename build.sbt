@@ -80,7 +80,6 @@ lazy val core = project
       "org.sangria-graphql"        %% "sangria-circe"             % sangriaCirceVersion,
       "edu.gemini"                 %% "clue-model"                % clueVersion,
       "edu.gemini"                 %% "lucuma-core"               % lucumaCoreVersion,
-//      "edu.gemini"                 %% "lucuma-sso-backend-client" % lucumaSsoVersion,
       "org.tpolecat"               %% "atto-core"                 % attoVersion,
       "org.typelevel"              %% "cats-core"                 % catsVersion,
       "org.typelevel"              %% "cats-effect"               % catsEffectVersion,
@@ -99,8 +98,6 @@ lazy val core = project
       "eu.timepit"                 %% "singleton-ops"             % singletonOpsVersion,
       "eu.timepit"                 %% "refined"                   % refinedVersion,
       "eu.timepit"                 %% "refined-cats"              % refinedVersion,
-
-
       "edu.gemini"                 %% "lucuma-core-testkit"       % lucumaCoreVersion      % Test,
       "io.chrisdavenport"          %% "cats-scalacheck"           % catsScalacheckVersion  % Test,
       "org.scalameta"              %% "munit"                     % munitVersion           % Test,
@@ -125,7 +122,6 @@ lazy val service = project
       "org.sangria-graphql"        %% "sangria-circe"             % sangriaCirceVersion,
       "edu.gemini"                 %% "clue-model"                % clueVersion,
       "edu.gemini"                 %% "lucuma-core"               % lucumaCoreVersion,
-//      "edu.gemini"                 %% "lucuma-sso-backend-client" % lucumaSsoVersion,
       "org.tpolecat"               %% "atto-core"                 % attoVersion,
       "org.typelevel"              %% "cats-core"                 % catsVersion,
       "org.typelevel"              %% "cats-effect"               % catsEffectVersion,
@@ -146,6 +142,7 @@ lazy val service = project
       "org.http4s"                 %% "http4s-dsl"                % http4sVersion,
       "edu.gemini"                 %% "clue-http4s-jdk-client"    % clueVersion            % Test,
       "org.typelevel"              %% "munit-cats-effect-3"       % munitCatsEffectVersion % Test,
+      "edu.gemini"                 %% "lucuma-graphql-routes-sangria" % "0.0.0+276-95e64a04+20210818-1047-SNAPSHOT",
     ),
     testFrameworks += new TestFramework("munit.Framework"),
     Test / parallelExecution := false, // tests run fine in parallel but output is nicer this way
