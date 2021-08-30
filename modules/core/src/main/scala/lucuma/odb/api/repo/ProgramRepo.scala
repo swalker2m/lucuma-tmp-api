@@ -3,9 +3,11 @@
 
 package lucuma.odb.api.repo
 
-import lucuma.odb.api.model.{Event, InputError, ProgramModel}
-import lucuma.odb.api.model.ProgramModel.ProgramEvent
 import lucuma.core.model.Program
+import lucuma.core.optics.state.all._
+import lucuma.odb.api.model.{Event, InputError, ProgramModel, ValidatedInput}
+import lucuma.odb.api.model.ProgramModel.ProgramEvent
+import lucuma.odb.api.model.syntax.validatedinput._
 import cats.implicits._
 import cats.MonadError
 import cats.data.{EitherT, State}
@@ -23,6 +25,7 @@ trait ProgramRepo[F[_]] extends TopLevelRepo[F, Program.Id, ProgramModel] {
 
   def insert(input: ProgramModel.Create): F[ProgramModel]
 
+  def edit(input: ProgramModel.Edit): F[ProgramModel]
 }
 
 object ProgramRepo {
@@ -50,7 +53,10 @@ object ProgramRepo {
 
         selectPageFiltered(count, afterGid, includeDeleted) { p => pids(p.id) }
 
-      override def insert(input: ProgramModel.Create): F[ProgramModel] = {
+      override def insert(
+        input: ProgramModel.Create
+      ): F[ProgramModel] = {
+
         val create = EitherT(
           tablesRef.modify { tables =>
             val (tablesʹ, p) = input.create[State[Tables, *], Tables](TableState).run(tables).value
@@ -65,6 +71,26 @@ object ProgramRepo {
         for {
           p <- create
           _ <- eventService.publish(ProgramEvent(_, Event.EditType.Created, p))
+        } yield p
+      }
+
+      override def edit(
+        input: ProgramModel.Edit
+      ): F[ProgramModel] = {
+
+        val update: State[Tables, ValidatedInput[ProgramModel]] =
+          for {
+            initial <- TableState.program.lookupValidated[State[Tables, *]](input.programId)
+            edited   = initial.andThen(input.edit)
+            _       <- edited.fold(
+              _ => State.get[Tables].void,
+              p => Tables.programs.mod_(progMap => progMap + (p.id -> p))
+            )
+          } yield edited
+
+        for {
+          p <- tablesRef.modifyState(update).flatMap(_.liftTo[F])
+          _ <- eventService.publish(ProgramModel.ProgramEvent.updated(p))
         } yield p
       }
 

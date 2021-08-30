@@ -18,6 +18,7 @@ object MutationType {
     ObjectType(
       name   = "Mutation",
       fields =
+        ProgramMutation.allFields[F]       ++
         ObservationMutation.allFields[F]   ++
         TargetMutation.allFields[F]        ++
         ExecutionEventMutation.allFields[F]
