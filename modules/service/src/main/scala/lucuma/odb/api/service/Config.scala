@@ -6,8 +6,7 @@ package lucuma.odb.api.service
 import lucuma.sso.client.SsoClient.UserInfo
 import lucuma.sso.client.{SsoClient, SsoJwtReader}
 import lucuma.sso.client.util.{GpgPublicKeyReader, JwtDecoder}
-
-import cats.effect.{Async, Resource, Sync}
+import cats.effect.{Async, Concurrent, Resource}
 import cats.syntax.all._
 import ciris.{ConfigDecoder, ConfigValue, env, prop}
 import org.http4s.Uri
@@ -26,7 +25,7 @@ final case class Config(
   serviceJwt:   String
 ) {
 
-  def jwtReader[F[_]: Sync]: SsoJwtReader[F] =
+  def jwtReader[F[_]: Concurrent]: SsoJwtReader[F] =
     SsoJwtReader(JwtDecoder.withPublicKey(ssoPublicKey))
 
   def httpClientResource[F[_]: Async]: Resource[F, Client[F]] =

@@ -44,7 +44,10 @@ trait OdbSuite extends CatsEffectSuite {
     new SsoClient[IO, User] {
       def find(req: Request[IO]): IO[Option[User]] = IO.pure(None)
       def get(authorization: Authorization): IO[Option[User]] = IO.pure(None)
+      def require(req: Request[IO])(f: User => IO[Response[IO]]): IO[Response[IO]] = ???
       def map[B](f: User => B): SsoClient[IO,B] = ???
+      def filter(f: User => Boolean): SsoClient[IO, User] = ???
+      def collect[B](f: PartialFunction[User, B]): SsoClient[IO, B] = ???
     }
 
   private val app: IO[HttpApp[IO]] =
