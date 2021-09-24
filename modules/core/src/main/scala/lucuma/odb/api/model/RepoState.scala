@@ -18,9 +18,13 @@ trait RepoState[T, A, B] extends RepoReader[T, A, B] {
 
   def getUnusedId[F[_]: Monad](suggestion: Option[A])(implicit G: Gid[A], S: Stateful[F, T]): F[ValidatedInput[A]]
 
-  def save[F[_]: Applicative](a: A, b: B)(implicit G: Gid[A], S: Stateful[F, T]): F[ValidatedInput[Unit]]
+  def saveNew[F[_]: Applicative](a: A, b: B)(implicit G: Gid[A], S: Stateful[F, T]): F[ValidatedInput[Unit]]
 
-  def saveIfValid[F[_]: Applicative](b: ValidatedInput[B])(id: B => A)(implicit G: Gid[A], S: Stateful[F, T]): F[ValidatedInput[Unit]]
+  def saveNewIfValid[F[_]: Applicative](b: ValidatedInput[B])(id: B => A)(implicit G: Gid[A], S: Stateful[F, T]): F[ValidatedInput[Unit]]
+
+  def update[F[_]: Applicative](a: A, b: B)(implicit G: Gid[A], S: Stateful[F, T]): F[Unit]
+
+  def delete[F[_]: Applicative](a: A)(implicit G: Gid[A], S: Stateful[F, T]): F[Unit]
 
 }
 
@@ -46,6 +50,9 @@ object RepoState {
       override def lookupOption[F[_] : Functor](a: A)(implicit G: Gid[A], S: Stateful[F, T]): F[Option[B]] =
         reader.lookupOption(a)
 
+      override def findAll[F[_]: Functor](f: ((A, B)) => Boolean)(implicit S: Stateful[F, T]): F[List[B]] =
+        reader.findAll(f)
+
       override def cycleNextUnused[F[_]: Monad](implicit G: Gid[A], S: Stateful[F, T]): F[A] = {
         val unused: F[Boolean] =
           for {
@@ -69,18 +76,23 @@ object RepoState {
           }
         }
 
-      override def save[F[_]: Applicative](a: A, b: B)(implicit G: Gid[A], S: Stateful[F, T]): F[ValidatedInput[Unit]] =
+      override def saveNew[F[_]: Applicative](a: A, b: B)(implicit G: Gid[A], S: Stateful[F, T]): F[ValidatedInput[Unit]] =
         isDefinedAt(a).ifA(
           Applicative[F].pure(alreadyDefined(a).invalidNec[Unit]),
-          S.modify(mapLens.modify(_ + (a -> b))).map(_.validNec[InputError])
+          update(a, b).map(_.validNec[InputError])
         )
 
-      override def saveIfValid[F[_]: Applicative](b: ValidatedInput[B])(id: B => A)(implicit G: Gid[A], S: Stateful[F, T]): F[ValidatedInput[Unit]] = {
+      override def saveNewIfValid[F[_]: Applicative](b: ValidatedInput[B])(id: B => A)(implicit G: Gid[A], S: Stateful[F, T]): F[ValidatedInput[Unit]] =
         b.fold(
           nec => Applicative[F].pure(nec.invalid[Unit]),
-          v   => save(id(v), v)
+          v   => saveNew(id(v), v)
         )
-      }
+
+      override def update[F[_]: Applicative](a: A, b: B)(implicit G: Gid[A], S: Stateful[F, T]): F[Unit] =
+        S.modify(mapLens.modify(_ + (a -> b)))
+
+      override def delete[F[_]: Applicative](a: A)(implicit G: Gid[A], S: Stateful[F, T]): F[Unit] =
+        S.modify(mapLens.modify(_ - a))
 
     }
 

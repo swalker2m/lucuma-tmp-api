@@ -3,8 +3,8 @@
 
 package lucuma.odb.api.repo
 
-import lucuma.core.model.{Atom, ExecutionEvent, Observation, Program, Step}
-import lucuma.odb.api.model.{AtomModel,ExecutionEventModel, ObservationModel, ProgramModel, StepModel}
+import lucuma.core.model.{Atom, ExecutionEvent, Observation, Program, Step, Target}
+import lucuma.odb.api.model.{AtomModel, ExecutionEventModel, ObservationModel, ProgramModel, StepModel, TargetEnvironment, TargetEnvironmentModel, TargetModel}
 import cats.instances.order._
 import monocle.Lens
 import monocle.function.At
@@ -15,24 +15,28 @@ import scala.collection.immutable.{SortedMap, TreeMap}
  * Simplistic immutable database "tables" of top-level types keyed by Id.
  */
 final case class Tables(
-  ids:             Ids,
-  atoms:           SortedMap[Atom.Id, AtomModel[Step.Id]],
-  executionEvents: SortedMap[ExecutionEvent.Id, ExecutionEventModel],
-  observations:    SortedMap[Observation.Id, ObservationModel],
-  programs:        SortedMap[Program.Id, ProgramModel],
-  steps:           SortedMap[Step.Id, StepModel[_]]
+  ids:                Ids,
+  atoms:              SortedMap[Atom.Id, AtomModel[Step.Id]],
+  executionEvents:    SortedMap[ExecutionEvent.Id, ExecutionEventModel],
+  observations:       SortedMap[Observation.Id, ObservationModel],
+  programs:           SortedMap[Program.Id, ProgramModel],
+  steps:              SortedMap[Step.Id, StepModel[_]],
+  targets:            SortedMap[Target.Id, TargetModel],
+  targetEnvironments: SortedMap[TargetEnvironment.Id, TargetEnvironmentModel]
 )
 
 object Tables extends TableOptics {
 
   val empty: Tables =
     Tables(
-      ids             = Ids.zero,
-      atoms           = TreeMap.empty[Atom.Id, AtomModel[Step.Id]],
-      executionEvents = TreeMap.empty[ExecutionEvent.Id, ExecutionEventModel],
-      observations    = TreeMap.empty[Observation.Id, ObservationModel],
-      programs        = TreeMap.empty[Program.Id, ProgramModel],
-      steps           = TreeMap.empty[Step.Id, StepModel[_]]
+      ids                = Ids.zero,
+      atoms              = TreeMap.empty[Atom.Id, AtomModel[Step.Id]],
+      executionEvents    = TreeMap.empty[ExecutionEvent.Id, ExecutionEventModel],
+      observations       = TreeMap.empty[Observation.Id, ObservationModel],
+      programs           = TreeMap.empty[Program.Id, ProgramModel],
+      steps              = TreeMap.empty[Step.Id, StepModel[_]],
+      targets            = TreeMap.empty[Target.Id, TargetModel],
+      targetEnvironments = TreeMap.empty[TargetEnvironment.Id, TargetEnvironmentModel]
     )
 
 }
@@ -59,6 +63,12 @@ sealed trait TableOptics { self: Tables.type =>
 
   val lastStepId: Lens[Tables, Step.Id] =
     ids.andThen(Ids.lastStep)
+
+  val lastTargetId: Lens[Tables, Target.Id] =
+    ids.andThen(Ids.lastTarget)
+
+  val lastTargetEnvironmentId: Lens[Tables, TargetEnvironment.Id] =
+    ids.andThen(Ids.lastTargetEnvironment)
 
   val atoms: Lens[Tables, SortedMap[Atom.Id, AtomModel[Step.Id]]] =
     Lens[Tables, SortedMap[Atom.Id, AtomModel[Step.Id]]](_.atoms)(b => a => a.copy(atoms = b))
@@ -89,5 +99,17 @@ sealed trait TableOptics { self: Tables.type =>
 
   def step(sid: Step.Id): Lens[Tables, Option[StepModel[_]]] =
     steps.andThen(At.at(sid))
+
+  val targets: Lens[Tables, SortedMap[Target.Id, TargetModel]] =
+    Lens[Tables, SortedMap[Target.Id, TargetModel]](_.targets)(b => _.copy(targets = b))
+
+  def target(tid: Target.Id): Lens[Tables, Option[TargetModel]] =
+    targets.andThen(At.at(tid))
+
+  val targetEnvironments: Lens[Tables, SortedMap[TargetEnvironment.Id, TargetEnvironmentModel]] =
+    Lens[Tables, SortedMap[TargetEnvironment.Id, TargetEnvironmentModel]](_.targetEnvironments)(b => _.copy(targetEnvironments = b))
+
+  def targetEnvironment(vid: TargetEnvironment.Id): Lens[Tables, Option[TargetEnvironmentModel]] =
+    targetEnvironments.andThen(At.at(vid))
 
 }

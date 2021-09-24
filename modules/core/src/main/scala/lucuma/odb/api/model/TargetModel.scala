@@ -6,27 +6,48 @@ package lucuma.odb.api.model
 import lucuma.odb.api.model.json.target._
 import lucuma.core.`enum`.{EphemerisKeyType, MagnitudeBand}
 import lucuma.core.math.{Coordinates, Declination, Epoch, Parallax, ProperMotion, RadialVelocity, RightAscension}
-import lucuma.core.model.{CatalogId, EphemerisKey, Magnitude, Observation, SiderealTracking, Target}
+import lucuma.core.model.{CatalogId, EphemerisKey, Magnitude, SiderealTracking, Target}
 import lucuma.core.optics.syntax.optional._
 import lucuma.core.optics.state.all._
+import lucuma.odb.api.model.TargetEnvironmentModel.SelectTargetEnvironmentInput
 import lucuma.odb.api.model.syntax.input._
-import cats.Eq
+import lucuma.odb.api.model.syntax.validatedinput._
+import cats.{Eq, Monad}
 import cats.data._
-import cats.implicits._
+import cats.implicits.catsKernelOrderingForOrder
+import monocle.Focus
+import cats.mtl.Stateful
+import cats.syntax.apply._
+import cats.syntax.flatMap._
+import cats.syntax.functor._
+import cats.syntax.option._
+import cats.syntax.traverse._
 import clue.data.Input
 import eu.timepit.refined.cats._
 import eu.timepit.refined.types.string.NonEmptyString
 import io.circe.Decoder
 import io.circe.generic.semiauto._
 import io.circe.refined._
-import lucuma.core.util.Gid
+import lucuma.core.util.Enumerated
 import monocle.{Lens, Optional}
 
-import scala.collection.immutable.SortedMap
+import scala.collection.immutable.{SortedMap, SortedSet}
+
+
+final case class TargetModel(
+  id:                  Target.Id,
+  targetEnvironmentId: TargetEnvironment.Id,
+  target:              Target
+)
 
 object TargetModel extends TargetOptics {
 
-  type TargetMap = SortedMap[NonEmptyString, Target]
+  implicit val EqTargetModel: Eq[TargetModel] =
+    Eq.by { a => (
+      a.id,
+      a.targetEnvironmentId,
+      a.target
+    )}
 
   object parse {
 
@@ -44,51 +65,132 @@ object TargetModel extends TargetOptics {
 
   }
 
-  private def formatObservationId(oid: Option[Observation.Id]): String =
-    oid.map(o => s" in observation ${Gid[Observation.Id].show(o)}").getOrElse("")
+
+  sealed trait TargetOperation extends Product with Serializable
+
+  object TargetOperation {
+
+    case object Create extends TargetOperation
+    case object Edit   extends TargetOperation
+    case object Delete extends TargetOperation
+
+    implicit val EnumeratedTargetOperation: Enumerated[TargetOperation] =
+      Enumerated.of(Create, Edit, Delete)
+
+  }
+
+  /**
+   * An ADT describing target edits, which include creating, updating, and
+   * deleting.
+   */
+  final case class TargetEdit(
+    op:     TargetOperation,
+    target: TargetModel
+  )
+
+  object TargetEdit {
+
+    implicit val EqTargetEdit: Eq[TargetEdit] =
+      Eq.by { a => (
+        a.op,
+        a.target
+      )}
+
+    def create(t: TargetModel): TargetEdit =
+      TargetEdit(TargetOperation.Create, t)
+
+    def edit(t: TargetModel): TargetEdit =
+      TargetEdit(TargetOperation.Edit, t)
+
+    def delete(t: TargetModel): TargetEdit =
+      TargetEdit(TargetOperation.Delete, t)
+
+  }
+
+
+  // TODO: move to TargetEnvironmentModel ?
+
+
+  final case class TargetEnvironmentEdit(
+    targetEnvironment: TargetEnvironmentModel,
+    observation:       Option[ObservationModel],
+    program:           ProgramModel,
+    edits:             List[TargetEdit]
+  )
+
+  object TargetEnvironmentEdit {
+
+    private def groupAndMap[F[_]: Monad, T](
+      db:    DatabaseState[T],
+      edits: List[TargetEdit]
+    )(implicit S: Stateful[F, T]): F[ValidatedInput[List[TargetEnvironmentEdit]]] =
+      edits
+        .groupBy(_.target.targetEnvironmentId)
+        .toList
+        .traverse { case (vid, edits) =>
+          for {
+            v <- db.targetEnvironment.lookupValidated(vid)
+            o <- v.flatTraverse(_.observationId.traverse(oid => Nested(db.observation.lookupValidated(oid))).value)
+            p <- v.flatTraverse(v => db.program.lookupValidated(v.programId))
+          } yield (v, o, p).mapN { case (vʹ, oʹ, pʹ) =>
+            TargetEnvironmentEdit(vʹ, oʹ, pʹ, edits)
+          }
+        }.map(_.sequence)
+
+    def fromTargetEdits[F[_]: Monad, T](
+      db:    DatabaseState[T],
+      edits: F[ValidatedInput[List[TargetEdit]]]
+    )(implicit S: Stateful[F, T]):  F[ValidatedInput[List[TargetEnvironmentEdit]]] =
+      edits.flatMap(_.flatTraverse(groupAndMap(db, _)))
+
+  }
 
   /**
    * Input required to create either a non-sidereal or sidereal target.
    */
-  final case class Create(
-    nonsidereal: Option[CreateNonsidereal],
-    sidereal:    Option[CreateSidereal]
+  final case class CreateTargetInput(
+    nonsidereal: Option[CreateNonsiderealInput],
+    sidereal:    Option[CreateSiderealInput]
   ) {
 
-    def validateObservationEdit(
-      targetNames:   Set[NonEmptyString],
-      listName:      String,
-      observationId: Option[Observation.Id]
-    ): ValidatedInput[Set[NonEmptyString]] =
-      nonsidereal.map(_.validateObservationEdit(targetNames, listName, observationId))
-        .orElse(sidereal.map(_.validateObservationEdit(targetNames, listName, observationId)))
-        .getOrElse(targetNames.validNec[InputError])
-
-    def targetMapEditor: ValidatedInput[TargetMap => TargetMap] =
-      ValidatedInput.requireOne(
+    def create[F[_]: Monad, T](
+      db:  DatabaseState[T],
+      vid: TargetEnvironment.Id
+    )(implicit S: Stateful[F, T]): F[ValidatedInput[TargetModel]] =
+      ValidatedInput.requireOneF(
         "create",
-        nonsidereal.map(_.targetMapEditor),
-        sidereal.map(_.targetMapEditor)
+        nonsidereal.map(_.create(db, vid)),
+        sidereal.map(_.create(db, vid))
+      )
+
+    def createAll[F[_]: Monad, T](
+      db: DatabaseState[T],
+      vs: SortedSet[TargetEnvironment.Id]
+    )(implicit S: Stateful[F, T]): F[ValidatedInput[List[TargetEnvironmentEdit]]] =
+      ValidatedInput.requireOneF(
+        "create",
+        nonsidereal.map(_.createAll(db, vs)),
+        sidereal.map(_.createAll(db, vs))
       )
 
   }
 
-  object Create {
+  object CreateTargetInput {
 
-    implicit val DecoderCreate: Decoder[Create] =
-      deriveDecoder[Create]
+    implicit val DecoderCreateTargetInput: Decoder[CreateTargetInput] =
+      deriveDecoder[CreateTargetInput]
 
-    implicit val EqCreate: Eq[Create] =
+    implicit val EqCreateTargetInput: Eq[CreateTargetInput] =
       Eq.by { a => (
         a.nonsidereal,
         a.sidereal
       )}
 
-    def nonsidereal(n: CreateNonsidereal): Create =
-      Create(n.some, None)
+    def nonsidereal(n: CreateNonsiderealInput): CreateTargetInput =
+      CreateTargetInput(n.some, None)
 
-    def sidereal(s: CreateSidereal): Create =
-      Create(None, s.some)
+    def sidereal(s: CreateSiderealInput): CreateTargetInput =
+      CreateTargetInput(None, s.some)
 
   }
 
@@ -97,44 +199,49 @@ object TargetModel extends TargetOptics {
 
     def toGemTarget: ValidatedInput[Target]
 
-    def validateObservationEdit(
-      targetNames:   Set[NonEmptyString],
-      listName:      String,
-      observationId: Option[Observation.Id]
-    ): ValidatedInput[Set[NonEmptyString]] = {
+    def create[F[_]: Monad, T](
+      db:  DatabaseState[T],
+      vid: TargetEnvironment.Id
+    )(implicit S: Stateful[F, T]): F[ValidatedInput[TargetModel]] =
+      for {
+        i <- db.target.cycleNextUnused
+        v <- db.targetEnvironment.lookupValidated(vid)
+        tm = (v, toGemTarget).mapN { (_, g) => TargetModel(i, vid, g) }
+        _ <- db.target.saveNewIfValid(tm)(_.id)
+      } yield tm
 
-      def alreadyExists: InputError =
-        InputError.fromMessage(
-          s"Cannot create a new $listName target with name '$name' because one already exists${formatObservationId(observationId)}"
-        )
-
-      if (targetNames(name)) alreadyExists.invalidNec[Set[NonEmptyString]]
-      else (targetNames + name).validNec[InputError]
-
-    }
-
-    def targetMapEditor: ValidatedInput[TargetMap => TargetMap] =
-      toGemTarget.map { t => _ + (name -> t) }
-
+    def createAll[F[_]: Monad, T](
+      db: DatabaseState[T],
+      vs: SortedSet[TargetEnvironment.Id]
+    )(implicit S: Stateful[F, T]): F[ValidatedInput[List[TargetEnvironmentEdit]]] =
+      TargetEnvironmentEdit.fromTargetEdits(
+        db,
+        SelectTargetEnvironmentInput
+          .validateNonEmpty(vs, "cannot create targets without specifying a target environment")
+          .flatTraverse {
+            _.toNonEmptyList
+             .traverse(create(db, _))
+             .map(_.sequence.map(_.map(TargetEdit.create).toList))
+          }
+      )
   }
-
 
   /**
    * Describes input used to create a nonsidereal target.
    *
-   * @param name target name
-   * @param key ephemeris key type
-   * @param des semi-permanent horizons identifier (relative to key type)
+   * @param name    target name
+   * @param keyType ephemeris key type
+   * @param des     semi-permanent horizons identifier (relative to key type)
    */
-  final case class CreateNonsidereal(
+  final case class CreateNonsiderealInput(
     name:       NonEmptyString,
-    key:        EphemerisKeyType,
+    keyType:    EphemerisKeyType,
     des:        String,
     magnitudes: Option[List[MagnitudeModel.Create]]
   ) extends TargetCreator {
 
     val toEphemerisKey: ValidatedInput[EphemerisKey] =
-      parse.ephemerisKey("des", key, des)
+      parse.ephemerisKey("des", keyType, des)
 
     override val toGemTarget: ValidatedInput[Target] =
       (toEphemerisKey,
@@ -145,15 +252,15 @@ object TargetModel extends TargetOptics {
 
   }
 
-  object CreateNonsidereal {
+  object CreateNonsiderealInput {
 
-    implicit val DecoderCreateNonsidereal: Decoder[CreateNonsidereal] =
-      deriveDecoder[CreateNonsidereal]
+    implicit val DecoderCreateNonsiderealInput: Decoder[CreateNonsiderealInput] =
+      deriveDecoder[CreateNonsiderealInput]
 
-    implicit val EqCreateNonsidereal: Eq[CreateNonsidereal] =
+    implicit val EqCreateNonsiderealInput: Eq[CreateNonsiderealInput] =
       Eq.by(cn => (
         cn.name,
-        cn.key,
+        cn.keyType,
         cn.des,
         cn.magnitudes
       ))
@@ -171,7 +278,7 @@ object TargetModel extends TargetOptics {
    * @param radialVelocity radial velocity
    * @param parallax parallax
    */
-  final case class CreateSidereal(
+  final case class CreateSiderealInput(
     name:           NonEmptyString,
     catalogId:      Option[CatalogIdModel.Input],
     ra:             RightAscensionModel.Input,
@@ -210,14 +317,14 @@ object TargetModel extends TargetOptics {
 
   }
 
-  object CreateSidereal {
+  object CreateSiderealInput {
 
     def fromRaDec(
       name: NonEmptyString,
       ra:   RightAscensionModel.Input,
       dec:  DeclinationModel.Input
-    ): CreateSidereal =
-      CreateSidereal(
+    ): CreateSiderealInput =
+      CreateSiderealInput(
         name           = name,
         catalogId      = None,
         ra             = ra,
@@ -229,10 +336,10 @@ object TargetModel extends TargetOptics {
         magnitudes     = None
       )
 
-    implicit val DecoderCreateSidereal: Decoder[CreateSidereal] =
-      deriveDecoder[CreateSidereal]
+    implicit val DecoderCreateSiderealInput: Decoder[CreateSiderealInput] =
+      deriveDecoder[CreateSiderealInput]
 
-    implicit val EqCreateSidereal: Eq[CreateSidereal] =
+    implicit val EqCreateSidereal: Eq[CreateSiderealInput] =
       Eq.by(cs => (
         cs.name,
         cs.catalogId,
@@ -247,111 +354,82 @@ object TargetModel extends TargetOptics {
 
   }
 
-  /**
-   * Input required to edit either a non-sidereal or sidereal target.
-   */
-  final case class Edit(
-    selectTarget: NonEmptyString,
-    nonsidereal:  Option[EditNonsidereal],
-    sidereal:     Option[EditSidereal],
+  //
+  // # Target selection.  Choose at least one of `names` or `targetIds`.
+  // input SelectTargetInput {
+  //
+  //   names:     [ NonEmptyString! ]
+  //   targetIds: [ TargetId! ]
+  //
+  // }
+  //
+  final case class SelectTargetInput(
+    names:     Option[List[NonEmptyString]],
+    targetIds: Option[List[Target.Id]]
   ) {
 
-    def validateObservationEdit(
-      targetNames:   Set[NonEmptyString],
-      listName:      String,
-      observationId: Option[Observation.Id]
-    ): ValidatedInput[Set[NonEmptyString]] =
+    private def toSet[A](as: Option[List[A]]): Set[A] =
+      as.fold(Set.empty[A])(_.toSet)
 
-      nonsidereal.map(_.validateObservationEdit(selectTarget, targetNames, listName, observationId))
-        .orElse(sidereal.map(_.validateObservationEdit(selectTarget, targetNames, listName, observationId)))
-        .getOrElse(targetNames.validNec[InputError])
+    val nameMatches: Set[NonEmptyString] =
+      toSet(names)
 
-    val targetMapEditor: ValidatedInput[TargetMap => TargetMap] =
-      ValidatedInput.requireOne(
-        "edit",
-        nonsidereal.map(_.targetMapEditor(selectTarget)),
-        sidereal.map(_.targetMapEditor(selectTarget))
-      )
+    val idMatches: Set[Target.Id] =
+      toSet(targetIds)
+
+    def matches(vs: Set[TargetEnvironment.Id], t: TargetModel): Boolean =
+      (idMatches(t.id) && (vs.isEmpty || vs(t.targetEnvironmentId))) ||  // identified by target id (env optional)
+      (nameMatches(t.target.name) && vs(t.targetEnvironmentId))          // identified by name (requires env)
 
   }
 
-  object Edit {
+  object SelectTargetInput {
 
-    implicit val DecoderEdit: Decoder[Edit] =
-      deriveDecoder[Edit]
+    implicit val DecoderSelectTarget: Decoder[SelectTargetInput] =
+      deriveDecoder[SelectTargetInput]
 
-    implicit val EqEdit: Eq[Edit] =
+    implicit val EqSelectTarget: Eq[SelectTargetInput] =
       Eq.by { a => (
-        a.selectTarget,
-        a.nonsidereal,
-        a.sidereal
+        a.names,
+        a.targetIds
       )}
-
-    def nonsidereal(selectTarget: NonEmptyString, n: EditNonsidereal): Edit =
-      Edit(selectTarget, n.some, None)
-
-    def sidereal(selectTarget: NonEmptyString, s: EditSidereal): Edit =
-      Edit(selectTarget, None, s.some)
 
   }
 
   sealed trait TargetEditor {
 
-    def name: Input[NonEmptyString]
+    def select: SelectTargetInput
 
     def editor: ValidatedInput[State[Target, Unit]]
 
-    def validateObservationEdit(
-      selectTarget:  NonEmptyString,
-      targetNames:   Set[NonEmptyString],
-      listName:      String,
-      observationId: Option[Observation.Id]
-    ): ValidatedInput[Set[NonEmptyString]] = {
-
-      def missing: InputError =
-        InputError.fromMessage(
-          s"Missing $listName target '$selectTarget'${formatObservationId(observationId)}"
-        )
-
-      def wouldReplace(newName: NonEmptyString): InputError =
-        InputError.fromMessage(
-          s"Cannot rename '$selectTarget' to '$newName' because there is already a $listName target named '$newName'${formatObservationId(observationId)}"
-        )
-
-      val validateRename: ValidatedInput[Set[NonEmptyString]] =
-        name.fold(
-          targetNames.validNec[InputError],
-          targetNames.validNec[InputError],
-          n => if ((n =!= selectTarget) && targetNames(n)) wouldReplace(n).invalidNec[Set[NonEmptyString]]
-               else ((targetNames - selectTarget) + n).validNec[InputError]
-        )
-
-      if (targetNames(selectTarget)) validateRename
-      else missing.invalidNec[Set[NonEmptyString]]
-
-    }
-
-    def targetMapEditor(selectTarget: NonEmptyString): ValidatedInput[TargetMap => TargetMap] =
-
-      editor.map { ed => m =>
-
-        def normalEdit(t: Target): TargetMap =
-          m.updated(selectTarget, ed.runS(t).value)
-
-        def renameEdit(newName: NonEmptyString, t: Target): TargetMap =
-          m.removed(selectTarget).updated(newName, ed.runS(t).value)
-
-        m.get(selectTarget).fold(m) { t =>
-          name.fold(normalEdit(t), normalEdit(t), renameEdit(_, t))
+    private def editTargets[F[_]: Monad, T](
+      db: DatabaseState[T],
+      vs: SortedSet[TargetEnvironment.Id]
+    )(implicit S: Stateful[F, T]): F[ValidatedInput[List[TargetModel]]] =
+      for {
+        v   <- vs.toList.traverse(v => db.targetEnvironment.lookupValidated[F](v)).map(_.sequence)
+        tms <- db.target.findAll { case (_, tm) => select.matches(vs, tm) }
+        tmsʹ = (v, editor).mapN { (_, e) =>
+          tms.map(target.modify(t => e.runS(t).value))
         }
+        _ <- tmsʹ.traverse(_.traverse(tm => db.target.update(tm.id, tm)))
+      } yield tmsʹ
 
-      }
+    def edit[F[_]: Monad, T](
+      db: DatabaseState[T],
+      vs: SortedSet[TargetEnvironment.Id]
+    )(implicit S: Stateful[F, T]): F[ValidatedInput[List[TargetEnvironmentEdit]]] =
+      TargetEnvironmentEdit.fromTargetEdits(
+        db,
+        Nested(editTargets(db, vs)).map(_.map(TargetEdit.edit)).value
+      )
 
   }
 
-  final case class EditNonsidereal(
-    name: Input[NonEmptyString] = Input.ignore,
-    key:  Input[EphemerisKey]   = Input.ignore,
+  final case class EditNonsiderealInput(
+    select: SelectTargetInput,
+    name:   Input[NonEmptyString] = Input.ignore,
+    key:    Input[EphemerisKey]   = Input.ignore,
   ) extends TargetEditor {
 
     override val editor: ValidatedInput[State[Target, Unit]] =
@@ -366,24 +444,26 @@ object TargetModel extends TargetOptics {
 
   }
 
-  object EditNonsidereal {
+  object EditNonsiderealInput {
 
     import io.circe.generic.extras.semiauto._
     import io.circe.generic.extras.Configuration
     implicit val customConfig: Configuration = Configuration.default.withDefaults
 
-    implicit val DecoderEditNonSidereal: Decoder[EditNonsidereal] =
-      deriveConfiguredDecoder[EditNonsidereal]
+    implicit val DecoderEditNonSidereal: Decoder[EditNonsiderealInput] =
+      deriveConfiguredDecoder[EditNonsiderealInput]
 
-    implicit val EqEditNonsidereal: Eq[EditNonsidereal] =
+    implicit val EqEditNonsidereal: Eq[EditNonsiderealInput] =
       Eq.by(en => (
+        en.select,
         en.name,
         en.key
       ))
 
   }
 
-  final case class EditSidereal(
+  final case class EditSiderealInput(
+    select:           SelectTargetInput,
     name:             Input[NonEmptyString]            = Input.ignore,
     catalogId:        Input[CatalogIdModel.Input]      = Input.ignore,
     ra:               Input[RightAscensionModel.Input] = Input.ignore,
@@ -421,18 +501,19 @@ object TargetModel extends TargetOptics {
 
   }
 
-  object EditSidereal {
+  object EditSiderealInput {
 
     import io.circe.generic.extras.semiauto._
     import io.circe.generic.extras.Configuration
     implicit val customConfig: Configuration = Configuration.default.withDefaults
 
 
-    implicit val DecoderEditSidereal: Decoder[EditSidereal] =
-      deriveConfiguredDecoder[EditSidereal]
+    implicit val DecoderEditSidereal: Decoder[EditSiderealInput] =
+      deriveConfiguredDecoder[EditSiderealInput]
 
-    implicit val EqEditSidereal: Eq[EditSidereal] =
+    implicit val EqEditSidereal: Eq[EditSiderealInput] =
       Eq.by(es => (
+        es.select,
         es.name,
         es.catalogId,
         es.ra,
@@ -446,125 +527,223 @@ object TargetModel extends TargetOptics {
 
   }
 
-  final case class EditTargetAction(
-    add:    Option[Create],
-    delete: Option[NonEmptyString],
-    edit:   Option[Edit],
-  ) {
 
-    def targetMapEditor(fieldName: String): ValidatedInput[TargetMap => TargetMap] =
-      ValidatedInput.requireOne(
-        fieldName,
-        add.map(_.targetMapEditor),
-        delete.map { name => ((m: TargetMap) => m.removed(name)).validNec[InputError] },
-        edit.map(_.targetMapEditor)
+  sealed trait EditTargetAction {
+    def addSidereal:     Option[CreateSiderealInput]
+
+    def addNonsidereal:  Option[CreateNonsiderealInput]
+
+    def editSidereal:    Option[EditSiderealInput]
+
+    def editNonsidereal: Option[EditNonsiderealInput]
+
+    def delete:          Option[SelectTargetInput]
+
+    protected def doDeletion[F[_]: Monad, T](
+      db:  DatabaseState[T],
+      vs:  SortedSet[TargetEnvironment.Id],
+      del: SelectTargetInput
+    )(implicit S: Stateful[F, T]): F[ValidatedInput[List[TargetEnvironmentEdit]]] =
+      TargetEnvironmentEdit.fromTargetEdits(
+        db,
+        for {
+          v   <- vs.toList.traverse(v => db.targetEnvironment.lookupValidated[F](v)).map(_.sequence)
+          tms <- db.target.findAll { case (_, tm) => del.matches(vs, tm) }
+          res <- v.as(tms.traverse(tm => db.target.delete(tm.id)).as(tms)).sequence
+        } yield Nested(res).map(TargetEdit.delete).value
       )
 
-    def validateObservationEdit(
-      targetNames:   Set[NonEmptyString],
-      listName:      String,
-      observationId: Option[Observation.Id]
-    ): ValidatedInput[Set[NonEmptyString]] = {
+    def editEnv[F[_]: Monad, T](
+      db: DatabaseState[T],
+      vs: SortedSet[TargetEnvironment.Id]
+    )(implicit S: Stateful[F, T]): F[ValidatedInput[List[TargetEnvironmentEdit]]] =
+      ValidatedInput.requireOneF("edit",
+        addSidereal.map(_.createAll[F, T](db, vs)),
+        addNonsidereal.map(_.createAll[F, T](db, vs)),
+        editSidereal.map(_.edit[F, T](db, vs)),
+        delete.map(doDeletion[F, T](db, vs, _))
+      )
+  }
 
-      def validateDelete(n: NonEmptyString): ValidatedInput[Set[NonEmptyString]] =
-        if (targetNames(n))
-          (targetNames - n).validNec[InputError]
-        else
-          InputError.fromMessage(
-            s"Could not delete $listName target '$n'${formatObservationId(observationId)} because it was not found"
-          ).invalidNec[Set[NonEmptyString]]
 
-      add.map(_.validateObservationEdit(targetNames, listName, observationId))
-        .orElse(delete.map(validateDelete))
-        .orElse(edit.map(_.validateObservationEdit(targetNames, listName, observationId)))
-        .getOrElse(targetNames.validNec[InputError])
+  final case class BulkEditTargetInput(
+    select:          Option[SelectTargetEnvironmentInput],
 
+    addSidereal:     Option[CreateSiderealInput],
+    addNonsidereal:  Option[CreateNonsiderealInput],
+    editSidereal:    Option[EditSiderealInput],
+    editNonsidereal: Option[EditNonsiderealInput],
+    delete:          Option[SelectTargetInput]
+  ) extends EditTargetAction {
+
+    def edit[F[_]: Monad, T](
+      db: DatabaseState[T]
+    )(implicit S: Stateful[F, T]): F[ValidatedInput[List[TargetEnvironmentEdit]]] =
+      for {
+        s <- SelectTargetEnvironmentInput.ids(db, select)
+        e <- s.traverse(editEnv(db, _))
+      } yield e.flatten
+
+  }
+
+  object BulkEditTargetInput {
+
+    implicit val DecoderBulkEditTargetInput: Decoder[BulkEditTargetInput] =
+      deriveDecoder[BulkEditTargetInput]
+
+    implicit val EqBulkEditTarget: Eq[BulkEditTargetInput] =
+      Eq.by { a => (
+        a.addSidereal,
+        a.addNonsidereal,
+        a.editSidereal,
+        a.editNonsidereal,
+        a.delete
+      )}
+
+    val Empty: BulkEditTargetInput =
+      BulkEditTargetInput(None, None, None, None, None, None)
+
+    def addSidereal(s: Option[SelectTargetEnvironmentInput], c: CreateSiderealInput): BulkEditTargetInput =
+      Empty.copy(select = s, addSidereal = c.some)
+
+    def addNonsidereal(s: Option[SelectTargetEnvironmentInput], c: CreateNonsiderealInput): BulkEditTargetInput =
+      Empty.copy(select = s, addNonsidereal = c.some)
+
+    def editSidereal(s: Option[SelectTargetEnvironmentInput], e: EditSiderealInput): BulkEditTargetInput =
+      Empty.copy(select = s, editSidereal = e.some)
+
+    def editNonsidereal(s: Option[SelectTargetEnvironmentInput], e: EditNonsiderealInput): BulkEditTargetInput =
+      Empty.copy(select = s, editNonsidereal = e.some)
+
+    def delete(s: Option[SelectTargetEnvironmentInput], d: SelectTargetInput): BulkEditTargetInput =
+      Empty.copy(select = s, delete = d.some)
+
+  }
+
+  final case class EditTargetInput(
+    addSidereal:     Option[CreateSiderealInput],
+    addNonsidereal:  Option[CreateNonsiderealInput],
+    editSidereal:    Option[EditSiderealInput],
+    editNonsidereal: Option[EditNonsiderealInput],
+    delete:          Option[SelectTargetInput]
+  ) extends EditTargetAction
+
+  object EditTargetInput {
+
+    implicit val DecoderEditTargetInput: Decoder[EditTargetInput] =
+      deriveDecoder[EditTargetInput]
+
+    implicit val EqEditTargetInput: Eq[EditTargetInput] =
+      Eq.by { a => (
+        a.addSidereal,
+        a.addNonsidereal,
+        a.editSidereal,
+        a.editNonsidereal,
+        a.delete
+      )}
+
+    val Empty: EditTargetInput =
+      EditTargetInput(None, None, None, None, None)
+
+    def addSidereal(c: CreateSiderealInput): EditTargetInput =
+      Empty.copy(addSidereal = c.some)
+
+    def addNonsidereal(c: CreateNonsiderealInput): EditTargetInput =
+      Empty.copy(addNonsidereal = c.some)
+
+    def editSidereal(e: EditSiderealInput): EditTargetInput =
+      Empty.copy(editSidereal = e.some)
+
+    def editNonsidereal(e: EditNonsiderealInput): EditTargetInput =
+      Empty.copy(editNonsidereal = e.some)
+
+    def delete(d: SelectTargetInput): EditTargetInput =
+      Empty.copy(delete = d.some)
+
+  }
+
+
+  final case class BulkEditTargetListInput(
+    select: Option[SelectTargetEnvironmentInput],
+    edits:  List[EditTargetInput]
+  ) {
+
+    def edit[F[_]: Monad, T](
+      db:  DatabaseState[T]
+    )(implicit S: Stateful[F, T]): F[ValidatedInput[List[TargetEnvironmentEdit]]] =
+      for {
+        s <- SelectTargetEnvironmentInput.ids(db, select)
+        e <- s.traverse(ids => edits.traverse(_.editEnv(db, ids))).map(_.map(_.flatSequence))
+      } yield e.flatten
+
+  }
+
+  object BulkEditTargetListInput {
+
+    implicit val DecoderBulkEditTargetListInput: Decoder[BulkEditTargetListInput] =
+      deriveDecoder[BulkEditTargetListInput]
+
+    implicit val EqBulkEditTargetListInput: Eq[BulkEditTargetListInput] =
+      Eq.by { a => (
+        a.select,
+        a.edits
+      )}
+
+  }
+
+
+  final case class BulkReplaceTargetListInput(
+    select:  SelectTargetEnvironmentInput,
+    replace: List[CreateTargetInput]
+  ) {
+
+    def replace[F[_]: Monad, T](
+      db:  DatabaseState[T]
+    )(implicit S: Stateful[F, T]): F[ValidatedInput[List[TargetEnvironmentEdit]]] = {
+
+      def deleteTargets(vs: SortedSet[TargetEnvironment.Id]): F[List[TargetEdit]] =
+        for {
+          tms <- db.target.findAll { case (_, tm) => vs(tm.targetEnvironmentId) }
+          res <- tms.traverse(tm => db.target.delete(tm.id)).as(tms.map(TargetEdit.delete))
+        } yield res
+
+      def createTargets(vs: SortedSet[TargetEnvironment.Id]): F[ValidatedInput[List[TargetEdit]]] =
+        replace
+          .traverse(cti => vs.toList.traverse(cti.create(db, _)))
+          .map(_.flatten.sequence.map(_.map(TargetEdit.create)))
+
+      TargetEnvironmentEdit.fromTargetEdits(
+        db,
+        for {
+          s <- select.selectIds(db)
+          d <- s.traverse(deleteTargets)
+          e <- s.traverse(createTargets)
+        } yield (d, e.flatten).mapN(_ ++ _)
+      )
     }
 
   }
 
-  object EditTargetAction {
+  object BulkReplaceTargetListInput {
 
-    implicit val DecoderEditTargetAction: Decoder[EditTargetAction] =
-      deriveDecoder[EditTargetAction]
+    implicit val DecoderBulkReplaceTargetListInput: Decoder[BulkReplaceTargetListInput] =
+      deriveDecoder[BulkReplaceTargetListInput]
 
-    implicit val EqEditTargetAction: Eq[EditTargetAction] =
+    implicit val EqBulkReplaceTargetListInput: Eq[BulkReplaceTargetListInput] =
       Eq.by { a => (
-        a.add,
-        a.delete,
-        a.edit
+        a.select,
+        a.replace
       )}
-
-    def add(c: Create): EditTargetAction =
-      EditTargetAction(c.some, None, None)
-
-    def delete(n: NonEmptyString): EditTargetAction =
-      EditTargetAction(None, n.some, None)
-
-    def edit(e: Edit): EditTargetAction =
-      EditTargetAction(None, None, e.some)
-
-  }
-
-  final case class EditTargetList(
-    replaceList: Option[List[TargetModel.Create]],
-    editList:    Option[List[EditTargetAction]]
-  ) {
-
-    def validateObservationEdit(
-      targetNames:   Set[NonEmptyString],
-      listName:      String,
-      observationId: Option[Observation.Id]
-    ): ValidatedInput[Set[NonEmptyString]] =
-      replaceList.map { cs =>
-        cs.foldLeft(Set.empty[NonEmptyString].validNec[InputError]) { (vs, c) =>
-          vs.andThen(s => c.validateObservationEdit(s, listName, observationId))
-        }
-      }.orElse(editList.map { es =>
-        es.foldLeft(targetNames.validNec[InputError]) { (vs, e) =>
-          vs.andThen(s => e.validateObservationEdit(s, listName, observationId))
-        }
-      }).getOrElse(targetNames.validNec[InputError])
-
-    def targetMapEditor(
-      listName:      String,
-    ): ValidatedInput[TargetMap => TargetMap] =
-      ValidatedInput.requireOne(
-        listName,
-        replaceList.map { cs =>
-          cs.traverse(_.targetMapEditor)
-            .map { lst => (_: TargetMap) => lst.foldLeft(SortedMap.empty[NonEmptyString, Target])((m, f) => f(m)) }
-        },
-        editList.map { es =>
-          es.traverse(_.targetMapEditor("editList"))
-            .map { lst => (m: TargetMap) => lst.foldLeft(m)((m, f) => f(m)) }
-        }
-      )
-
-  }
-
-  object EditTargetList {
-
-    implicit val DecoderEditTargetList: Decoder[EditTargetList] =
-      deriveDecoder[EditTargetList]
-
-    implicit val EqEditTargetList: Eq[EditTargetList] =
-      Eq.by { a => (
-        a.replaceList,
-        a.editList
-      )}
-
-    def replace(cs: List[TargetModel.Create]): EditTargetList =
-      EditTargetList(cs.some, None)
-
-    def edit(es: List[EditTargetAction]): EditTargetList =
-      EditTargetList(None, es.some)
 
   }
 
 }
 
+
 trait TargetOptics { self: TargetModel.type =>
+
+  val target: Lens[TargetModel, Target] =
+    Focus[TargetModel](_.target)
 
   val name: Lens[Target, NonEmptyString] =
     Target.name

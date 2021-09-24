@@ -79,7 +79,7 @@ object AtomModel {
             a   = (i, hʹ, tʹ.sequence).mapN { (iʹʹ, hʹʹ, tʹʹ) =>
               AtomModel.ofSteps(iʹʹ, hʹʹ, tʹʹ: _*)
             }
-            _  <- db.atom.saveIfValid(Nested(a).map(_.id).value)(_.id)
+            _  <- db.atom.saveNewIfValid(Nested(a).map(_.id).value)(_.id)
           } yield a
 
       }

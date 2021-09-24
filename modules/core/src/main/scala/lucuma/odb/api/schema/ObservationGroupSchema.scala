@@ -57,7 +57,7 @@ object ObservationGroupSchema {
         Field(
           name        = valueName,
           fieldType   = outType,
-          description = s"Commonly held value across the observations".some,
+          description = "Commonly held value across the observations".some,
           resolve     = _.value.value
         )
 

@@ -3,6 +3,7 @@
 
 package lucuma.odb.api.model
 
+import cats.Applicative
 import cats.syntax.all._
 import eu.timepit.refined._
 import eu.timepit.refined.api._
@@ -19,6 +20,22 @@ object ValidatedInput {
       case List(a) => a
       case Nil     => InputError.missingInput(name).invalidNec[A]
       case _       => InputError.fromMessage(s"Multiple '$name' definitions are not permitted").invalidNec[A]
+    }
+
+  def requireOneF[F[_]: Applicative, A](
+    name: String,
+    a:    Option[F[ValidatedInput[A]]]*
+  ): F[ValidatedInput[A]] =
+    requireOneF[F, A](name, a.toList)
+
+  def requireOneF[F[_]: Applicative, A](
+    name: String,
+    as:   List[Option[F[ValidatedInput[A]]]]
+  ): F[ValidatedInput[A]] =
+    as.flattenOption match {
+      case List(a) => a
+      case Nil     => Applicative[F].pure(InputError.missingInput(name).invalidNec[A])
+      case _       => Applicative[F].pure(InputError.fromMessage(s"Multiple '$name' definitions are not permitted").invalidNec[A])
     }
 
   def optionEither[A, B](

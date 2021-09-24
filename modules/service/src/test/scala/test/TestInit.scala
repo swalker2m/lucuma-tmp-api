@@ -285,7 +285,7 @@ object TestInit {
       name                 = targets.headOption.map(_.name) orElse NonEmptyString.from("Observation").toOption,
       status               = ObsStatus.New.some,
       activeStatus         = ObsActiveStatus.Active.some,
-      targets              = TargetEnvironmentModel.Create.fromSidereal(targets).some,
+      targets              = TargetEnvironmentModel.CreateTargetEnvironmentInput.fromSidereal(targets).some,
       constraintSet        = None,
       scienceRequirements  = ScienceRequirementsModel.Create.Default.some,
       scienceConfiguration = None,
@@ -326,7 +326,7 @@ object TestInit {
       _  <- repo.observation.edit(
         ObservationModel.Edit(
           o.id,
-          targets = TargetEnvironmentModel.Edit.explicitBase(
+          targets = TargetEnvironmentModel.EditTargetEnvironmentInput.explicitBase(
             RightAscensionModel.Input.fromDegrees(159.2583),
             DeclinationModel.Input.fromDegrees(-27.5650)
           ).some

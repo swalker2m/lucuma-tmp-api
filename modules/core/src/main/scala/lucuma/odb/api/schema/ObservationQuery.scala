@@ -3,12 +3,11 @@
 
 package lucuma.odb.api.schema
 
-import lucuma.odb.api.model.{ConstraintSetModel, InputError, ObservationModel, ScienceRequirements, TargetEnvironmentModel}
+import lucuma.odb.api.model.{ConstraintSetModel, InputError, ObservationModel, ScienceRequirements}
 import lucuma.odb.api.repo.{OdbRepo, ResultPage}
 import cats.MonadError
 import cats.effect.std.Dispatcher
 import cats.syntax.all._
-import lucuma.core.model.Target
 import sangria.schema._
 
 trait ObservationQuery {
@@ -20,7 +19,6 @@ trait ObservationQuery {
   import ProgramSchema.OptionalProgramIdArgument
   import ObservationSchema.{ObservationIdArgument, ObservationType, ObservationConnectionType, OptionalListObservationIdArgument}
   import ScienceRequirementsSchema.ScienceRequirementsType
-  import TargetSchema.{TargetEnvironmentType, TargetType}
 
   def observations[F[_]: Dispatcher](implicit E: MonadError[F, Throwable]): Field[OdbRepo[F], Unit] =
     Field(
@@ -62,33 +60,6 @@ trait ObservationQuery {
       resolve     = c => c.observation(_.select(c.observationId, c.includeDeleted))
     )
 
-  def groupByScienceTarget[F[_]: Dispatcher](implicit ev: MonadError[F, Throwable]): Field[OdbRepo[F], Unit] =
-
-    ObservationGroupSchema.groupingField[F, Target](
-      "scienceTarget",
-      "Observations grouped by commonly held individual science targets",
-      TargetType[F],
-      (repo, pid, includeDeleted) => repo.groupBySingleScienceTarget(pid, includeDeleted)
-    )
-
-  def groupByAllScienceTargets[F[_]: Dispatcher](implicit ev: MonadError[F, Throwable]): Field[OdbRepo[F], Unit] =
-
-    ObservationGroupSchema.groupingField[F, Seq[Target]](
-      "allScienceTargets",
-      "Observations grouped by commonly held collections of science targets",
-      ListType(TargetType[F]),
-      (repo, pid, includeDeleted) => repo.groupByAllScienceTargets(pid, includeDeleted).map(_.map(_.map(_.toSeq)))
-    )
-
-  def groupByTargetEnvironment[F[_]: Dispatcher](implicit ev: MonadError[F, Throwable]): Field[OdbRepo[F], Unit] =
-
-    ObservationGroupSchema.groupingField[F, TargetEnvironmentModel](
-      "targetEnvironment",
-      "Observations grouped by commonly held target environment",
-      TargetEnvironmentType[F],
-      (repo, pid, includeDeleted) => repo.groupByTargetEnvironment(pid, includeDeleted)
-    )
-
   def groupByConstraintSet[F[_]: Dispatcher](implicit ev: MonadError[F, Throwable]): Field[OdbRepo[F], Unit] =
 
     ObservationGroupSchema.groupingField[F, ConstraintSetModel](
@@ -111,9 +82,6 @@ trait ObservationQuery {
     List(
       observations,
       forId,
-      groupByScienceTarget,
-      groupByAllScienceTargets,
-      groupByTargetEnvironment,
       groupByConstraintSet,
       groupByScienceRequirements
     )

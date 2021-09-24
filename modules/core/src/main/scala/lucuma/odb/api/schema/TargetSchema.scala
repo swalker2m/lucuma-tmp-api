@@ -3,18 +3,24 @@
 
 package lucuma.odb.api.schema
 
+import cats.MonadError
 import lucuma.odb.api.schema.syntax.all._
-import lucuma.odb.api.model.{DeclinationModel, ParallaxModel, ProperMotionModel, RadialVelocityModel, RightAscensionModel, TargetEnvironmentModel}
+import lucuma.odb.api.model.{DeclinationModel, ParallaxModel, ProperMotionModel, RadialVelocityModel, RightAscensionModel, TargetEnvironment, TargetEnvironmentModel, TargetModel}
 import lucuma.odb.api.repo.OdbRepo
-import lucuma.core.`enum`.{CatalogName, EphemerisKeyType => EphemerisKeyTypeEnum, MagnitudeBand, MagnitudeSystem}
+import lucuma.core.`enum`.{CatalogName, MagnitudeBand, MagnitudeSystem, EphemerisKeyType => EphemerisKeyTypeEnum}
 import lucuma.core.math.{Coordinates, Declination, MagnitudeValue, Parallax, ProperMotion, RadialVelocity, RightAscension, VelocityAxis}
 import lucuma.core.model.{CatalogId, EphemerisKey, Magnitude, SiderealTracking, Target}
 import cats.syntax.all._
+import cats.effect.std.Dispatcher
+import lucuma.odb.api.schema.GeneralSchema.ArgumentIncludeDeleted
+import lucuma.odb.api.schema.ObservationSchema.ObservationType
 import sangria.schema.{Field, _}
 
 object TargetSchema extends TargetScalars {
 
   import GeneralSchema.NonEmptyStringType
+
+  import context._
 
   implicit val TargetIdType: ScalarType[Target.Id] =
     ObjectIdSchema.idType[Target.Id]("TargetId")
@@ -31,6 +37,23 @@ object TargetSchema extends TargetScalars {
       name         = "targetId",
       argumentType = OptionInputType(TargetIdType),
       description  = "Target ID"
+    )
+
+  implicit val TargetEnvironmentIdType: ScalarType[TargetEnvironment.Id] =
+    ObjectIdSchema.idType[TargetEnvironment.Id]("TargetEnvironmentId")
+
+  val TargetEnvironmentIdArgument: Argument[TargetEnvironment.Id] =
+    Argument(
+      name         = "targetEnvironmentId",
+      argumentType = TargetEnvironmentIdType,
+      description  = "Target Environment ID"
+    )
+
+  val OptionalTargetEnvironmentIdArgument: Argument[Option[TargetEnvironment.Id]] =
+    Argument(
+      name         = "targetEnvironmentId",
+      argumentType = OptionInputType(TargetEnvironmentIdType),
+      description  = "Target environment ID"
     )
 
   implicit val EnumTypeCatalogName: EnumType[CatalogName] =
@@ -374,9 +397,8 @@ object TargetSchema extends TargetScalars {
 
   def TargetType[F[_]]: ObjectType[OdbRepo[F], Target] =
     ObjectType(
-      name     = "Target",
+      name     = "TargetCore",
       fieldsFn = () => fields(
-
         Field(
           name        = "name",
           fieldType   = NonEmptyStringType,
@@ -400,24 +422,86 @@ object TargetSchema extends TargetScalars {
       )
     )
 
-  def TargetEdgeType[F[_]]: ObjectType[OdbRepo[F], Paging.Edge[Target]] =
-    Paging.EdgeType(
-      "TargetEdge",
-      "A Target and its cursor",
-      TargetType[F]
-    )
-
-  def TargetConnectionType[F[_]]: ObjectType[OdbRepo[F], Paging.Connection[Target]] =
-    Paging.ConnectionType(
-      "TargetConnection",
-      "Targets in the current page",
-      TargetType[F],
-      TargetEdgeType[F]
-    )
-
-  def TargetEnvironmentType[F[_]]: ObjectType[OdbRepo[F], TargetEnvironmentModel] =
+  def TargetModelType[F[_]: Dispatcher](implicit ev: MonadError[F, Throwable]): ObjectType[OdbRepo[F], TargetModel] =
     ObjectType(
-      name = "Targets",
+      name     = "Target",
+      fieldsFn = () => fields(
+
+        Field(
+          name        = "id",
+          fieldType   = TargetIdType,
+          description = "Target ID".some,
+          resolve     = _.value.id
+        ),
+
+        Field(
+          name        = "targetEnvironmentId",
+          fieldType   = TargetEnvironmentIdType,
+          description = "Target environment ID".some,
+          resolve     = _.value.targetEnvironmentId
+        ),
+
+        Field(
+          name        = "name",
+          fieldType   = NonEmptyStringType,
+          description = Some("Target name."),
+          resolve     = _.value.target.name
+        ),
+
+        Field(
+          name        = "tracking",
+          fieldType   = TrackingType[F],
+          description = Some("Information required to find a target in the sky."),
+          resolve     = _.value.target.track
+        ),
+
+        Field(
+          name        = "magnitudes",
+          fieldType   = ListType(MagnitudeType[F]),
+          description = Some("Target magnitudes"),
+          resolve     = _.value.target.magnitudes.values.toList
+        ),
+
+        Field(
+          name        = "targetEnvironment",
+          fieldType   = TargetEnvironmentModelType,
+          description = "Target environment that houses this target".some,
+          resolve     = c => c.target(_.unsafeSelectTargetEnvironment(c.value.targetEnvironmentId))
+        ),
+
+        Field(
+          name        = "observation",
+          fieldType   = OptionType(ObservationType[F]),
+          description = "Observation that references this target, if any.".some,
+          arguments   = List(ArgumentIncludeDeleted),
+          resolve     = c => c.unsafeToFuture(
+            for {
+              e <- c.ctx.target.unsafeSelectTargetEnvironment(c.value.targetEnvironmentId)
+              o <- e.observationId.flatTraverse(c.ctx.observation.select(_, c.includeDeleted))
+            } yield o
+          )
+        )
+      )
+    )
+
+//  def TargetEdgeType[F[_]: Dispatcher](implicit ev: MonadError[F, Throwable]): ObjectType[OdbRepo[F], Paging.Edge[Target]] =
+//    Paging.EdgeType(
+//      "TargetEdge",
+//      "A Target and its cursor",
+//      TargetModelType[F]
+//    )
+//
+//  def TargetConnectionType[F[_]: Dispatcher](implicit ev: MonadError[F, Throwable]): ObjectType[OdbRepo[F], Paging.Connection[Target]] =
+//    Paging.ConnectionType(
+//      "TargetConnection",
+//      "Targets in the current page",
+//      TargetModelType[F],
+//      TargetEdgeType[F]
+//    )
+
+  def TargetEnvironmentModelType[F[_]: Dispatcher](implicit ev: MonadError[F, Throwable]): ObjectType[OdbRepo[F], TargetEnvironmentModel] =
+    ObjectType(
+      name = "TargetEnvironment",
       fieldsFn = () => fields (
 
         // TODO: a `base` field that takes a date and time and tells you where
@@ -433,10 +517,28 @@ object TargetSchema extends TargetScalars {
         ),
 
         Field(
-          name        = "science",
-          fieldType   = ListType(TargetType[F]),
-          description = "Science target(s)".some,
-          resolve     = _.value.science.values.toList
+          name        = "scienceTargets",
+          fieldType   = ListType(TargetModelType[F]),
+          description = "All science targets, if any".some,
+          resolve     = c => c.target(_.selectScienceTargetList(c.value.id))
+        ),
+
+        Field(
+          name        = "firstScienceTarget",
+          fieldType   = OptionType(TargetModelType[F]),
+          description = "First science target, if any".some,
+          resolve     = c => c.target(_.selectScienceTargetList(c.value.id).map(_.headOption))
+        ),
+
+        Field(
+          name        = "observation",
+          fieldType   = OptionType(ObservationType[F]),
+          description = "Observation housing this environment, if any".some,
+          arguments   = List(ArgumentIncludeDeleted),
+          resolve     = c => c.observation { repo =>
+            c.value.observationId.flatTraverse(repo.select(_, c.includeDeleted))
+          }
+
         )
 
       )

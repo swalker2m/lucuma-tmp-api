@@ -3,18 +3,22 @@
 
 package lucuma.odb.api.model
 
-import lucuma.core.model.{Atom, ExecutionEvent, Observation, Program, Step}
+import lucuma.core.model.{Atom, ExecutionEvent, Observation, Program, Step, Target}
 
 trait DatabaseState[T] extends DatabaseReader[T] {
 
-  def atom:           RepoState[T, Atom.Id, AtomModel[Step.Id]]
+  def atom:              RepoState[T, Atom.Id, AtomModel[Step.Id]]
 
-  def executionEvent: RepoState[T, ExecutionEvent.Id, ExecutionEventModel]
+  def executionEvent:    RepoState[T, ExecutionEvent.Id, ExecutionEventModel]
 
-  def observation:    RepoState[T, Observation.Id, ObservationModel]
+  def observation:       RepoState[T, Observation.Id, ObservationModel]
 
-  def program:        RepoState[T, Program.Id, ProgramModel]
+  def program:           RepoState[T, Program.Id, ProgramModel]
 
-  def step:           RepoState[T, Step.Id, StepModel[_]]
+  def step:              RepoState[T, Step.Id, StepModel[_]]
+
+  def target:            RepoState[T, Target.Id, TargetModel]
+
+  def targetEnvironment: RepoState[T, TargetEnvironment.Id, TargetEnvironmentModel]
 
 }

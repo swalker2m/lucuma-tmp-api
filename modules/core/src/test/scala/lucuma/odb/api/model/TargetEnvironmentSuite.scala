@@ -16,7 +16,7 @@ final class TargetEnvironmentSuite extends DisciplineSuite {
   import ArbTargetEnvironmentModel._
 
   checkAll("TargetEnvironmentModel", EqTests[TargetEnvironmentModel].eqv)
-  checkAll("TargetEnvironmentModel.Create", EqTests[TargetEnvironmentModel.Create].eqv)
-  checkAll("TargetEnvironmentModel.Edit", EqTests[TargetEnvironmentModel.Edit].eqv)
+  checkAll("TargetEnvironmentModel.Create", EqTests[TargetEnvironmentModel.CreateTargetEnvironmentInput].eqv)
+  checkAll("TargetEnvironmentModel.Edit", EqTests[TargetEnvironmentModel.EditTargetEnvironmentInput].eqv)
 
 }

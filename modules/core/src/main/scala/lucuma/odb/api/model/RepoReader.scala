@@ -25,6 +25,8 @@ trait RepoReader[T, A, B] extends Serializable { self =>
 
   def lookupOption[F[_]: Functor](a: A)(implicit G: Gid[A], S: Stateful[F, T]): F[Option[B]]
 
+  def findAll[F[_]: Functor](f: ((A, B)) => Boolean)(implicit S: Stateful[F, T]): F[List[B]]
+
 }
 
 object RepoReader {
@@ -48,6 +50,9 @@ object RepoReader {
 
       override def lookupOption[F[_]: Functor](a: A)(implicit G: Gid[A], S: Stateful[F, T]): F[Option[B]] =
         S.inspect(g.get(_).get(a))
+
+      override def findAll[F[_]: Functor](f: ((A, B)) => Boolean)(implicit S: Stateful[F, T]): F[List[B]] =
+        S.inspect(g.get(_).filter(f).values.toList)
 
     }
 

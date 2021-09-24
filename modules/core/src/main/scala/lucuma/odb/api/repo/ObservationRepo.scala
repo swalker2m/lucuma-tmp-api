@@ -3,10 +3,10 @@
 
 package lucuma.odb.api.repo
 
-import lucuma.core.model.{Observation, Program, Target}
+import lucuma.core.model.{Observation, Program}
 import lucuma.core.optics.state.all._
 import lucuma.odb.api.model.ObservationModel.{BulkEdit, Create, Edit, Group, ObservationEvent}
-import lucuma.odb.api.model.{ConstraintSetModel, Event, InputError, InstrumentConfigModel, ObservationModel, PlannedTimeSummaryModel, ScienceRequirements, ScienceRequirementsModel, TargetEnvironmentModel, TargetModel, ValidatedInput}
+import lucuma.odb.api.model.{ConstraintSetModel, Event, InputError, InstrumentConfigModel, ObservationModel, PlannedTimeSummaryModel, ScienceRequirements, ScienceRequirementsModel, ValidatedInput}
 import lucuma.odb.api.model.syntax.toplevel._
 import lucuma.odb.api.model.syntax.validatedinput._
 import cats.data.{EitherT, State}
@@ -37,21 +37,6 @@ sealed trait ObservationRepo[F[_]] extends TopLevelRepo[F, Observation.Id, Obser
 
   def edit(edit: Edit): F[ObservationModel]
 
-  def groupBySingleScienceTarget(
-    pid:            Program.Id,
-    includeDeleted: Boolean
-  ): F[List[Group[Target]]]
-
-  def groupByAllScienceTargets(
-    pid:            Program.Id,
-    includeDeleted: Boolean
-  ): F[List[Group[List[Target]]]]
-
-  def groupByTargetEnvironment(
-    pid:            Program.Id,
-    includeDeleted: Boolean
-  ): F[List[Group[TargetEnvironmentModel]]]
-
   def groupByConstraintSet(
     pid:            Program.Id,
     includeDeleted: Boolean
@@ -61,18 +46,6 @@ sealed trait ObservationRepo[F[_]] extends TopLevelRepo[F, Observation.Id, Obser
     pid:            Program.Id,
     includeDeleted: Boolean
   ): F[List[Group[ScienceRequirements]]]
-
-  def bulkEditScienceTarget(
-    be: BulkEdit[TargetModel.Edit]
-  ): F[List[ObservationModel]]
-
-  def bulkEditAllScienceTargets(
-    be: BulkEdit[TargetModel.EditTargetList]
-  ): F[List[ObservationModel]]
-
-  def bulkEditTargetEnvironment(
-    be: BulkEdit[TargetEnvironmentModel.Edit]
-  ): F[List[ObservationModel]]
 
   def bulkEditConstraintSet(
     be: BulkEdit[ConstraintSetModel.Edit]
@@ -187,33 +160,6 @@ object ObservationRepo {
            .sortBy(_.observationIds.head)
         }
 
-      override def groupBySingleScienceTarget(
-        pid:            Program.Id,
-        includeDeleted: Boolean
-      ): F[List[Group[Target]]] =
-        tablesRef.get.map { t =>
-          t.observations
-           .filter { case (_, o) => (o.programId === pid) && (includeDeleted || o.isPresent) }
-           .toList
-           .flatMap { case (k, o) => o.targets.science.values.toList.tupleRight(k) }
-           .groupMap(_._1)(_._2)
-           .map { case (t, oids) => ObservationModel.Group.from(t, oids)}
-           .toList
-           .sortBy(_.observationIds.head)
-        }
-
-      override def groupByAllScienceTargets(
-        pid:            Program.Id,
-        includeDeleted: Boolean
-      ): F[List[Group[List[Target]]]] =
-        groupBy(pid, includeDeleted) { _.targets.science.values.toList }
-
-      override def groupByTargetEnvironment(
-        pid:            Program.Id,
-        includeDeleted: Boolean
-      ): F[List[Group[TargetEnvironmentModel]]] =
-        groupBy(pid, includeDeleted) { _.targets }
-
       override def groupByConstraintSet(
         pid:            Program.Id,
         includeDeleted: Boolean
@@ -273,38 +219,6 @@ object ObservationRepo {
         } yield os
 
       }
-
-      override def bulkEditScienceTarget(
-        be: BulkEdit[TargetModel.Edit]
-      ): F[List[ObservationModel]] =
-
-        bulkEdit(
-          selectObservations(be.selectProgram, be.selectObservations),
-          o => be.edit.validateObservationEdit(o.targets.science.keySet, "science", o.id.some).void,
-          be.edit.targetMapEditor.map(f => ObservationModel.scienceTargets.modify(f))
-        )
-
-      override def bulkEditAllScienceTargets(
-        be: BulkEdit[TargetModel.EditTargetList]
-      ): F[List[ObservationModel]] =
-
-        bulkEdit(
-          selectObservations(be.selectProgram, be.selectObservations),
-          o => be.edit.validateObservationEdit(o.targets.science.keySet, "science", o.id.some).void,
-          be.edit.targetMapEditor("science").map(f => ObservationModel.scienceTargets.modify(f))
-        )
-
-      override def bulkEditTargetEnvironment(
-        be: BulkEdit[TargetEnvironmentModel.Edit]
-      ): F[List[ObservationModel]] =
-
-        bulkEdit(
-          selectObservations(be.selectProgram, be.selectObservations),
-          o => be.edit.validateObservationEdit(o.targets, o.id.some),
-          be.edit.editor.map { ed =>
-            ObservationModel.targets.modify(env => ed.runS(env).value)
-          }
-        )
 
       override def bulkEditConstraintSet(
         be: BulkEdit[ConstraintSetModel.Edit]

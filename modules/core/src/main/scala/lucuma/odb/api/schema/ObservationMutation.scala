@@ -3,7 +3,7 @@
 
 package lucuma.odb.api.schema
 
-import lucuma.odb.api.model.{ConstraintSetModel, ObservationModel, ScienceRequirementsModel, TargetEnvironmentModel, TargetModel}
+import lucuma.odb.api.model.{ConstraintSetModel, ObservationModel, ScienceRequirementsModel}
 import lucuma.odb.api.model.ObservationModel.BulkEdit
 import lucuma.odb.api.repo.OdbRepo
 import lucuma.odb.api.schema.syntax.inputtype._
@@ -18,14 +18,14 @@ import sangria.schema._
 trait ObservationMutation {
 
   import ConstraintSetMutation.{InputObjectTypeConstraintSetCreate, InputObjectTypeConstraintSetEdit}
+  import context._
   import ScienceConfigurationMutation.{InputObjectTypeScienceConfigurationCreate, InputObjectTypeScienceConfigurationSetEdit}
   import ScienceRequirementsMutation.{InputObjectTypeScienceRequirementsCreate, InputObjectTypeScienceRequirementsEdit}
   import GeneralSchema.{EnumTypeExistence, NonEmptyStringType}
   import ObservationSchema.{ObsActiveStatusType, ObservationIdType, ObservationIdArgument, ObsStatusType, ObservationType}
   import ProgramSchema.ProgramIdType
-  import context._
+  import TargetMutation.InputObjectTypeTargetEnvironmentCreate
   import syntax.inputobjecttype._
-  import TargetMutation.{InputObjectTypeTargetEnvironmentCreate, InputObjectTypeTargetEdit, InputObjectTypeTargetEditList, InputObjectTypeTargetEnvironmentEdit}
 
   val InputObjectTypeObservationCreate: InputObjectType[ObservationModel.Create] =
     deriveInputObjectType[ObservationModel.Create](
@@ -48,7 +48,6 @@ trait ObservationMutation {
       ReplaceInputField("name",                 NonEmptyStringType.nullableField("name")),
       ReplaceInputField("status",               ObsStatusType.notNullableField("status")),
       ReplaceInputField("activeStatus",         ObsActiveStatusType.notNullableField("activeStatus")),
-      ReplaceInputField("targets",              InputObjectTypeTargetEnvironmentEdit.notNullableField("targets")),
       ReplaceInputField("constraintSet",        InputObjectTypeConstraintSetEdit.notNullableField("constraintSet")),
       ReplaceInputField("scienceRequirements",  InputObjectTypeScienceRequirementsEdit.nullableField("scienceRequirements")),
       ReplaceInputField("scienceConfiguration", InputObjectTypeScienceConfigurationSetEdit.nullableField("scienceConfiguration"))
@@ -80,24 +79,6 @@ trait ObservationMutation {
 
   }
 
-  val ArgumentScienceTargetBulkEdit: Argument[BulkEdit[TargetModel.Edit]] =
-    bulkEditArgument[TargetModel.Edit](
-      "scienceTarget",
-      InputObjectTypeTargetEdit
-    )
-
-  val ArgumentScienceTargetsBulkEdit: Argument[BulkEdit[TargetModel.EditTargetList]] =
-    bulkEditArgument[TargetModel.EditTargetList](
-      "scienceTargets",
-      InputObjectTypeTargetEditList
-    )
-
-  val ArgumentTargetEnvironmentBulkEdit: Argument[BulkEdit[TargetEnvironmentModel.Edit]] =
-    bulkEditArgument[TargetEnvironmentModel.Edit](
-      "targetEnvironment",
-      InputObjectTypeTargetEnvironmentEdit
-    )
-
   val ArgumentConstraintSetBulkEdit: Argument[BulkEdit[ConstraintSetModel.Edit]] =
     bulkEditArgument[ConstraintSetModel.Edit](
       "constraintSet",
@@ -124,30 +105,6 @@ trait ObservationMutation {
       fieldType = ObservationType[F],
       arguments = List(ArgumentObservationEdit),
       resolve   = c => c.observation(_.edit(c.arg(ArgumentObservationEdit)))
-    )
-
-  def updateScienceTarget[F[_]: Dispatcher](implicit ev: MonadError[F, Throwable]): Field[OdbRepo[F], Unit] =
-    Field(
-      name      = "updateScienceTarget",
-      fieldType = ListType(ObservationType[F]),
-      arguments = List(ArgumentScienceTargetBulkEdit),
-      resolve   = c => c.observation(_.bulkEditScienceTarget(c.arg(ArgumentScienceTargetBulkEdit)))
-    )
-
-  def updateScienceTargets[F[_]: Dispatcher](implicit ev: MonadError[F, Throwable]): Field[OdbRepo[F], Unit] =
-    Field(
-      name      = "updateScienceTargets",
-      fieldType = ListType(ObservationType[F]),
-      arguments = List(ArgumentScienceTargetsBulkEdit),
-      resolve   = c => c.observation(_.bulkEditAllScienceTargets(c.arg(ArgumentScienceTargetsBulkEdit)))
-    )
-
-  def updateTargetEnvironment[F[_]: Dispatcher](implicit ev: MonadError[F, Throwable]): Field[OdbRepo[F], Unit] =
-    Field(
-      name      = "updateTargetEnvironment",
-      fieldType = ListType(ObservationType[F]),
-      arguments = List(ArgumentTargetEnvironmentBulkEdit),
-      resolve   = c => c.observation(_.bulkEditTargetEnvironment(c.arg(ArgumentTargetEnvironmentBulkEdit)))
     )
 
   def updateConstraintSet[F[_]: Dispatcher](implicit ev: MonadError[F, Throwable]): Field[OdbRepo[F], Unit] =
@@ -186,9 +143,6 @@ trait ObservationMutation {
     List(
       create,
       update,
-      updateScienceTarget,
-      updateScienceTargets,
-      updateTargetEnvironment,
       updateConstraintSet,
       updateScienceRequirements,
       delete,

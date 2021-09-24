@@ -153,8 +153,8 @@ object Init {
 """
   )
 
-  val targets: Either[Exception, List[TargetModel.CreateSidereal]] =
-    targetsJson.traverse(decode[TargetModel.CreateSidereal])
+  val targets: Either[Exception, List[TargetModel.CreateSiderealInput]] =
+    targetsJson.traverse(decode[TargetModel.CreateSiderealInput])
 
   import GmosModel.{CreateCcdReadout, CreateSouthDynamic}
   import StepConfig.CreateStepConfig
@@ -280,7 +280,7 @@ object Init {
 
   def obs(
     pid:   Program.Id,
-    target: Option[TargetModel.CreateSidereal]
+    target: Option[TargetModel.CreateSiderealInput]
   ): ObservationModel.Create =
     ObservationModel.Create(
       observationId        = None,
@@ -288,8 +288,8 @@ object Init {
       name                 = target.map(_.name) orElse NonEmptyString.from("Observation").toOption,
       status               = ObsStatus.New.some,
       activeStatus         = ObsActiveStatus.Active.some,
-      targets              = target.fold(none[model.TargetEnvironmentModel.Create]) { sidereal =>
-        TargetEnvironmentModel.Create.singleSidereal(sidereal).some
+      targets              = target.fold(none[model.TargetEnvironmentModel.CreateTargetEnvironmentInput]) { sidereal =>
+        TargetEnvironmentModel.CreateTargetEnvironmentInput.singleSidereal(sidereal).some
       },
       constraintSet        = None,
       scienceRequirements  = ScienceRequirementsModel.Create.Default.some,
@@ -310,15 +310,13 @@ object Init {
       p  <- repo.program.insert(
               ProgramModel.Create(
                 None,
-                NonEmptyString.from("The real dark matter was the friends we made along the way").toOption,
-                None
+                NonEmptyString.from("The real dark matter was the friends we made along the way").toOption
               )
             )
       _  <- repo.program.insert(
               ProgramModel.Create(
                 None,
-                NonEmptyString.from("An Empty Placeholder Program").toOption,
-                None
+                NonEmptyString.from("An Empty Placeholder Program").toOption
               )
             )
       cs <- targets.liftTo[F]

@@ -3,33 +3,38 @@
 
 package lucuma.odb.api.repo
 
-import lucuma.core.model.{Atom, Step}
-import lucuma.core.model.{ExecutionEvent, Observation, Program}
+import lucuma.core.model.{Atom, ExecutionEvent, Observation, Program, Step, Target}
 import cats.kernel.BoundedEnumerable
+import lucuma.odb.api.model.TargetEnvironment
 import monocle.Lens
 
 /**
  * Tracking "last" used ids of top-level types.
  */
 final case class Ids(
-  event:          Long,
-  atom:           Atom.Id,
-  executionEvent: ExecutionEvent.Id,
-  observation:    Observation.Id,
-  program:        Program.Id,
-  step:           Step.Id
+  event:             Long,
+  atom:              Atom.Id,
+  executionEvent:    ExecutionEvent.Id,
+  observation:       Observation.Id,
+  program:           Program.Id,
+  step:              Step.Id,
+  target:            Target.Id,
+  targetEnvironment: TargetEnvironment.Id
 )
 
 object Ids extends IdsOptics {
 
   val zero: Ids =
     Ids(
-      event          = 0L,
-      atom           = BoundedEnumerable[Atom.Id].minBound,
-      executionEvent = BoundedEnumerable[ExecutionEvent.Id].minBound,
-      observation    = BoundedEnumerable[Observation.Id].minBound,
-      program        = BoundedEnumerable[Program.Id].minBound,
-      step           = BoundedEnumerable[Step.Id].minBound
+      event             = 0L,
+      atom              = BoundedEnumerable[Atom.Id].minBound,
+      executionEvent    = BoundedEnumerable[ExecutionEvent.Id].minBound,
+      observation       = BoundedEnumerable[Observation.Id].minBound,
+      program           = BoundedEnumerable[Program.Id].minBound,
+      step              = BoundedEnumerable[Step.Id].minBound,
+      target            = BoundedEnumerable[Target.Id].minBound,
+      targetEnvironment = BoundedEnumerable[TargetEnvironment.Id].minBound
+
     )
 
 }
@@ -53,5 +58,11 @@ sealed trait IdsOptics { self: Ids.type =>
 
   val lastStep: Lens[Ids, Step.Id] =
     Lens[Ids, Step.Id](_.step)(b => a => a.copy(step = b))
+
+  val lastTarget: Lens[Ids, Target.Id] =
+    Lens[Ids, Target.Id](_.target)(b => _.copy(target = b))
+
+  val lastTargetEnvironment: Lens[Ids, TargetEnvironment.Id] =
+    Lens[Ids, TargetEnvironment.Id](_.targetEnvironment)(b => _.copy(targetEnvironment = b))
 
 }

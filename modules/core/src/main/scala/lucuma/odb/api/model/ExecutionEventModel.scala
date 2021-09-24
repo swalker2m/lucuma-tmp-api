@@ -120,7 +120,7 @@ object ExecutionEventModel {
           i <- db.executionEvent.getUnusedId(eventId)
           o <- db.observation.lookupValidated[F](observationId)
           e  = (i, o).mapN((iʹ, _) => SequenceEvent(iʹ, observationId, generated, received, command))
-          _ <- db.executionEvent.saveIfValid(e)(_.id)
+          _ <- db.executionEvent.saveNewIfValid(e)(_.id)
         } yield e
 
     }
@@ -243,7 +243,7 @@ object ExecutionEventModel {
               stage
             )
           }
-          _ <- db.executionEvent.saveIfValid(e)(_.id)
+          _ <- db.executionEvent.saveNewIfValid(e)(_.id)
         } yield e
 
     }
@@ -379,7 +379,7 @@ object ExecutionEventModel {
             )
 
           }
-          _ <- db.executionEvent.saveIfValid(e)(_.id)
+          _ <- db.executionEvent.saveNewIfValid(e)(_.id)
         } yield e
 
     }

@@ -26,6 +26,8 @@ trait OdbRepo[F[_]] {
 
   def step: StepRepo[F]
 
+  def target: TargetRepo[F]
+
 }
 
 object OdbRepo {
@@ -65,6 +67,9 @@ object OdbRepo {
 
       override def step: StepRepo[F] =
         StepRepo.create[F](r)
+
+      override def target: TargetRepo[F] =
+        TargetRepo.create[F](r, s)
 
     }
 

@@ -64,7 +64,7 @@ object StepModel {
       for {
         i <- db.step.getUnusedId(id)
         o  = (i, config.create[B]).mapN { (i, c) => StepModel(i, breakpoint, c) }
-        _ <- db.step.saveIfValid(o)(_.id)
+        _ <- db.step.saveNewIfValid(o)(_.id)
       } yield o
 
   }

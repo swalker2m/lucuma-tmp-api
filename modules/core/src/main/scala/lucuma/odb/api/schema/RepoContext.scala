@@ -4,7 +4,7 @@
 package lucuma.odb.api.schema
 
 import lucuma.core.model.{Asterism, ExecutionEvent, Observation, Program, Step, Target}
-import lucuma.odb.api.repo.{AtomRepo, ExecutionEventRepo, ObservationRepo, OdbRepo, ProgramRepo, StepRepo}
+import lucuma.odb.api.repo.{AtomRepo, ExecutionEventRepo, ObservationRepo, OdbRepo, ProgramRepo, StepRepo, TargetRepo}
 
 import cats.effect.std.Dispatcher
 import cats.syntax.all._
@@ -91,6 +91,9 @@ final class RepoContextOps[F[_]](val self: Context[OdbRepo[F], _]) {
 
   def step[B](f: StepRepo[F] => F[B])(implicit ev: Dispatcher[F]): Future[B] =
     unsafeToFuture(f(self.ctx.step))
+
+  def target[B](f: TargetRepo[F] => F[B])(implicit ev: Dispatcher[F]): Future[B] =
+    unsafeToFuture(f(self.ctx.target))
 
 }
 

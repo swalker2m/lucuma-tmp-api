@@ -11,7 +11,7 @@ import cats.MonadError
 import cats.data.State
 import cats.effect.std.Dispatcher
 import cats.syntax.all._
-import lucuma.odb.api.schema.TargetSchema.TargetEnvironmentType
+import lucuma.odb.api.schema.TargetSchema.TargetEnvironmentModelType
 import sangria.schema._
 
 import scala.collection.immutable.Seq
@@ -122,9 +122,9 @@ object ObservationSchema {
 
         Field(
           name        = "targets",
-          fieldType   = TargetEnvironmentType[F],
+          fieldType   = OptionType(TargetEnvironmentModelType[F]),
           description = "The observation's target(s)".some,
-          resolve     = _.value.targets
+          resolve     = c => c.target(_.selectTargetEnvironmentForObservation(c.value.id))
         ),
 
         Field(

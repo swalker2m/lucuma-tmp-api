@@ -19,7 +19,6 @@ trait ProgramMutation {
   import ProgramSchema.ProgramIdType
   import context._
   import syntax.inputobjecttype._
-  import TargetMutation.{InputObjectTypeTargetEditList, InputObjectTypeTargetCreate}
 
   val InputObjectTypeProgramCreate: InputObjectType[ProgramModel.Create] =
     deriveInputObjectType[ProgramModel.Create](
@@ -39,7 +38,6 @@ trait ProgramMutation {
       InputObjectTypeDescription("Edit program"),
       ReplaceInputField("existence",     EnumTypeExistence.notNullableField("existence")),
       ReplaceInputField("name",          NonEmptyStringType.nullableField("name")),
-      ReplaceInputField("targetCatalog", InputObjectTypeTargetEditList.nullableField("targetCatalog"))
     )
 
   val ArgumentProgramEdit: Argument[ProgramModel.Edit] =

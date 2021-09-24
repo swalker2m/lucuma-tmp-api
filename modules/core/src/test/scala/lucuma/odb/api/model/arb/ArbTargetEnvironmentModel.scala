@@ -4,7 +4,7 @@
 package lucuma.odb.api.model
 package arb
 
-import TargetEnvironmentModel.{Create, Edit}
+import TargetEnvironmentModel.{CreateTargetEnvironmentInput, EditTargetEnvironmentInput}
 import lucuma.core.math.Coordinates
 import lucuma.core.math.arb.ArbCoordinates
 import lucuma.core.model.Target
@@ -44,7 +44,7 @@ trait ArbTargetEnvironmentModel {
       in.science.values.toList
     )}
 
-  implicit val arbCreateTargetEnvironment: Arbitrary[Create] =
+  implicit val arbCreateTargetEnvironment: Arbitrary[CreateTargetEnvironmentInput] =
     Arbitrary {
       for {
         b <- arbitrary[Option[CoordinatesModel.Input]]
@@ -52,7 +52,7 @@ trait ArbTargetEnvironmentModel {
       } yield Create(b, s)
     }
 
-  implicit val cogCreateTargetEnvironment: Cogen[Create] =
+  implicit val cogCreateTargetEnvironment: Cogen[CreateTargetEnvironmentInput] =
     Cogen[(
       Option[CoordinatesModel.Input],
       List[TargetModel.Create]
@@ -61,15 +61,15 @@ trait ArbTargetEnvironmentModel {
       in.science
     )}
 
-  implicit val arbEditTargetEnvironment: Arbitrary[Edit] =
+  implicit val arbEditTargetEnvironment: Arbitrary[EditTargetEnvironmentInput] =
     Arbitrary {
       for {
         b <- arbitrary[Input[CoordinatesModel.Input]]
         e <- arbitrary[Option[TargetModel.EditTargetList]]
-      } yield Edit(b, e)
+      } yield EditTargetEnvironmentInput(b, e)
     }
 
-  implicit val cogEditTargetEnvironment: Cogen[Edit] =
+  implicit val cogEditTargetEnvironment: Cogen[EditTargetEnvironmentInput] =
     Cogen[(
       Input[CoordinatesModel.Input],
       Option[TargetModel.EditTargetList]
